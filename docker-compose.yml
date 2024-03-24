@@ -1,0 +1,132 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:16.2
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=keycloak
+      - POSTGRES_USER=username
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+  pgbackups:
+    image: prodrigestivill/postgres-backup-local
+    container_name: pgbackups_container
+    restart: unless-stopped
+    user: postgres:postgres
+    volumes:
+      - ./data/postgres_backup:/var/opt/pgbackups
+    links:
+      - postgres
+    depends_on:
+      - postgres
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=database
+      - POSTGRES_USER=username
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_EXTRA_OPTS=-Z1 --schema=public --blobs
+      - SCHEDULE=@daily
+      - BACKUP_KEEP_DAYS=7
+      - BACKUP_KEEP_WEEKS=4
+      - BACKUP_KEEP_MONTHS=6
+      - HEALTHCHECK_PORT=8080
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin4_container
+    restart: unless-stopped
+    ports:
+      - 8888:80
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@mail.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    volumes:
+      - ./data/pgadmin-data:/var/lib/pgadmin
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.1
+    container_name: auth_keycloak
+    environment:
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/keycloak
+      - KC_DB_USERNAME=username
+      - KC_DB_PASSWORD=password
+      - KC_HOSTNAME=localhost
+      - KC_HOSTNAME_PORT=8080
+      - KC_HOSTNAME_STRICT=false
+      - KC_HOSTNAME_STRICT_HTTPS=false
+      - KC_LOG_LEVEL=info
+      - KC_METRICS_ENABLED=false
+      - KC_HEALTH_ENABLED=false
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    command: start-dev
+    depends_on:
+      - postgres
+    ports:
+      - 8080:8080
+
+  apisix:
+    image: apache/apisix:3.8.0-debian
+    container_name: apisix
+    restart: always
+    volumes:
+      - ./apisix_conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    depends_on:
+      - etcd
+    ports:
+      - "9180:9180"
+      - "9080:9080"
+      - "9091:9091"
+      - "9446:9443"
+      - "9092:9092"
+  etcd:
+    image: bitnami/etcd:3.5.11
+    restart: always
+    volumes:
+      - ./data/etcd_data:/bitnami/etcd
+    environment:
+      ETCD_ENABLE_V2: "true"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://etcd:2379"
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+    ports:
+      - "2379:2379"
+  apisix-dashboard:
+    image: apache/apisix-dashboard
+    container_name: apisix_dashboard
+    restart: always
+    volumes:
+      - ./apisix-dashboard/conf.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
+    depends_on:
+      - apisix
+    ports:
+      - "9009:9000"
+
+  rabbitmq:
+    image: rabbitmq:3.12.13-management
+    container_name: rabbitmq
+    restart: always
+    environment:
+      - RABBITMQ_DEFAULT_USER=user
+      - RABBITMQ_DEFAULT_PASS=password
+    volumes:
+      - ./data/rabbitmq_data:/var/lib/rabbitmq
+      - ./data/rabbitmq_log/log:/var/log/rabbitmq
+    ports:
+      - 5672:5672
+      - 15672:15672
+
+  redis-cache:
+    image: redis:7.2.4
+    restart: always
+    ports:
+      - '6379:6379'
+    command: redis-server --save 60 1 --loglevel warning
+    volumes: 
+      - ./data/redis_cache:/data
+  redis-gui:
+    image: oblakstudio/redisinsight:3.0
+    restart: always
+    ports:
+      - '5540:5540'
